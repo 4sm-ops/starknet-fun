@@ -11,6 +11,8 @@
 - compile contract with 
 
 ```
+cd test-contract
+
 starknet-compile src/Simple.cairo --output compiled/Simple.json
 ```
 
