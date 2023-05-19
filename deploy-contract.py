@@ -23,10 +23,19 @@ from starknet_py.net.account.account import Account
 
 from starknet_py.contract import Contract
 
+from starknet_py.hash.address import compute_address
+
 
 from starknet_py.constants import DEFAULT_DEPLOYER_ADDRESS, FIELD_PRIME
 
 # from starknet_py.tests.e2e.fixtures.constants import MAX_FEE
+
+from starknet_py.hash.transaction import (
+    TransactionHashPrefix,
+    compute_declare_transaction_hash,
+    compute_deploy_account_transaction_hash,
+    compute_transaction_hash,
+)
 
 SRC_FOLDER = "src/"
 import random
@@ -61,27 +70,7 @@ def starknet_create_code():
     return file_name
 
 
-# # To declare through Contract class you have to compile a contract and pass it to the Contract.declare
-# declare_result = await Contract.declare(
-#     account=account, compiled_contract=compiled_contract, max_fee=int(1e16)
-# )
-# # Wait for the transaction
-# await declare_result.wait_for_acceptance()
-
-# # After contract is declared it can be deployed
-# deploy_result = await declare_result.deploy(max_fee=int(1e16))
-# await deploy_result.wait_for_acceptance()
-
-# # You can pass more arguments to the `deploy` method. Check `API` section to learn more
-
-# # To interact with just deployed contract get its instance from the deploy_result
-# contract = deploy_result.deployed_contract
-
-# # Now, any of the contract functions can be called
-
-# starknet_create_code()
-
-
+## ДЕПЛОЙ ОБЫЧНОГО-КОНТРАКТА ##
 
 async def deploy_contract():
 
@@ -145,7 +134,42 @@ async def deploy_contract():
     print("https://starkscan.co/tx/" + str(hex(deploy_result.hash)))
 
 
-## MAIN ##
+## ДЕПЛОЙ АККАУНТА-КОНТРАКТА ##
+
+
+# async def get_deploy_account_transaction(
+#     *,
+#     address: int,
+#     key_pair: KeyPair,
+#     salt: int,
+#     class_hash: int,
+#     network: Optional[Network] = None,
+#     client: Optional[Client] = None,
+# ) -> DeployAccount:
+#     """
+#     Get a signed DeployAccount transaction from provided details
+#     """
+#     if network is None and client is None:
+#         raise ValueError("One of network or client must be provided.")
+
+#     account = Account(
+#         address=address,
+#         client=client
+#         or GatewayClient(
+#             net=cast(
+#                 Network, network
+#             )  # Cast needed because pyright doesn't recognize network as not None at this point
+#         ),
+#         key_pair=key_pair,
+#         chain=StarknetChainId.TESTNET,
+#     )
+#     return await account.sign_deploy_account_transaction(
+#         class_hash=class_hash,
+#         contract_address_salt=salt,
+#         constructor_calldata=[key_pair.public_key],
+#         max_fee=MAX_FEE,
+#     )
+
 
 async def deploy_account():
 
@@ -186,45 +210,95 @@ async def deploy_account():
 
     # создаём аккаунт
 
-    account = Account(
-        address=key_pair.public_key,
-        client=mainnet_client,
-        key_pair=key_pair,
-        chain=chain_id,
-    )
 
     MAX_FEE = int(1e16)
 
     # :param class_hash: Class hash of account to be deployed
     # это, вроде, для контрактов-аккаунтов
 
-    class_hash = 0x025ec026985a3bf9d0cc1fe17326b245dfdc3ff89b8fde106542a3ea56c5a918 # https://starkscan.co/class/0x025ec026985a3bf9d0cc1fe17326b245dfdc3ff89b8fde106542a3ea56c5a918
+    class_hash = "0x025ec026985a3bf9d0cc1fe17326b245dfdc3ff89b8fde106542a3ea56c5a918" # https://starkscan.co/class/0x025ec026985a3bf9d0cc1fe17326b245dfdc3ff89b8fde106542a3ea56c5a918
 
     # соль
 
-    salt = random.Random().randrange(0, FIELD_PRIME)
+    # salt = random.Random().randrange(0, FIELD_PRIME)
+    salt = int(new_key_from_api["starkKeyPublic"], 16) # такая соль у Аргента
+
+    contract_address=int(new_key_from_api["contractAddress"], 16)
+
+    # print(contract_address)
+
+
+    salt = int(new_key_from_api["starkKeyPublic"], 16)
+
+    # salt = random.Random().randrange(0, FIELD_PRIME)
+    # salt = 0
+
+
+
+    constructor_calldata_js = [
+      1449178161945088530446351771646113898511736767359683664273252560520029776866, # fixed value
+      215307247182100370520050591091822763712463273430149262739280891880522753123, # fixed value
+      2, # fixed value
+      salt, # меняется
+      0 # fixed value
+    ]
+
+    address = compute_address(
+        salt=salt,
+        class_hash=int(class_hash, 16),
+        constructor_calldata=constructor_calldata_js,
+        deployer_address=0,
+    )
+
+    # print(address)
+
+    # # деплоим аккаунт как у Ивана
+
+    # deploy_result = await Account.deploy_account(
+    #     address=contract_address,
+    #     key_pair=key_pair,
+    #     salt=salt,
+    #     class_hash=int(class_hash, 16),
+    #     client=mainnet_client,
+    #     chain=chain_id,
+    #     max_fee=MAX_FEE,
+    #     )
 
     # подписываем транзакцию
 
-    deploy_account_tx = await account.sign_deploy_account_transaction(
-        class_hash=class_hash,
-        contract_address_salt=salt,
-        constructor_calldata=[key_pair.public_key],
-        max_fee=MAX_FEE,
+    account = Account(
+        # address=address,
+        address = contract_address,
+        client=mainnet_client,
+        key_pair=key_pair,
+        chain=chain_id,
     )
 
-    # деплоим аккаунт
+
+    deploy_account_tx = await account.sign_deploy_account_transaction(
+        class_hash=int(class_hash, 16),
+        contract_address_salt=salt,
+        constructor_calldata=constructor_calldata_js, 
+        max_fee=MAX_FEE, 
+    )
+# у аргента вот что передаётся https://github.com/argentlabs/argent-x/blob/099b22927759b8fdf3b52c67a72e9072ac1289a0/packages/swap/src/sdk/hash.ts#L19
+
+#     # у аргента   const CONTRACT_ADDRESS_PREFIX = number.toFelt("0x535441524b4e45545f434f4e54524143545f41444452455353",
+
+#     # y python starknet либы : CONTRACT_ADDRESS_PREFIX = 523065374597054866729014270389667305596563390979550329787219
+
+
+#     # https://github.com/software-mansion/starknet.py/blob/48fafd0b18bf43fbf1f472da5708c1d3cb247e00/starknet_py/hash/address.py 
+
 
     deploy_account_result = await account.client.deploy_account(deploy_account_tx)
-
-    print(deploy_account_result.transaction_hash)
 
     print("https://starkscan.co/tx/" + str(hex(deploy_account_result.transaction_hash)))
 
     await account.client.wait_for_tx(deploy_account_result.transaction_hash)
 
 
-
+# # надо сюда compute_deploy_account_transaction_hash 
 
 
 if __name__ == '__main__':
